@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # MS SQL Server
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: hrpayroll-sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Password123
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - ./Backend/SQL:/docker-entrypoint-initdb.d
+    networks:
+      - hrpayroll-network
+    restart: unless-stopped
+
+  # Backend API
+  api:
+    build:
+      context: ./Backend/HRPayrollSystem.API
+      dockerfile: Dockerfile
+    container_name: hrpayroll-api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=HRPayrollSystem;User Id=sa;Password=YourStrong@Password123;TrustServerCertificate=True;
+    ports:
+      - "5000:5000"
+    depends_on:
+      - sqlserver
+    networks:
+      - hrpayroll-network
+    restart: unless-stopped
+
+  # Frontend Web
+  web:
+    build:
+      context: ./Frontend/HRPayrollSystem.Web
+      dockerfile: Dockerfile
+    container_name: hrpayroll-web
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    networks:
+      - hrpayroll-network
+    restart: unless-stopped
+
+volumes:
+  sqlserver-data:
+
+networks:
+  hrpayroll-network:
+    driver: bridge
