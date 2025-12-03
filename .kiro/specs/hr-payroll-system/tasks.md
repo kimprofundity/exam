@@ -12,7 +12,13 @@
   - 配置 appsettings.json 和環境變數
   - _需求：12.2, 15.1, 15.2_
 
-- [ ] 2. 設定資料庫和 Entity Framework Core
+- [x] 2. 設定資料庫和 Entity Framework Core
+
+
+
+
+
+
   - 執行資料庫建立腳本（00_CreateDatabase.sql）
   - 執行資料表建立腳本（01_CreateTables.sql）
   - 執行外鍵關聯腳本（03_AddMissingRelations.sql）
