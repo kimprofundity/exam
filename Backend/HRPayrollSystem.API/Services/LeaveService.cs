@@ -10,10 +10,14 @@ namespace HRPayrollSystem.API.Services;
 public class LeaveService : ILeaveService
 {
     private readonly HRPayrollContext _context;
+    private readonly INotificationService _notificationService;
 
-    public LeaveService(HRPayrollContext context)
+    public LeaveService(
+        HRPayrollContext context,
+        INotificationService notificationService)
     {
         _context = context;
+        _notificationService = notificationService;
     }
 
     /// <summary>
@@ -87,6 +91,19 @@ public class LeaveService : ILeaveService
         _context.LeaveRecords.Add(leaveRecord);
         await _context.SaveChangesAsync();
 
+        // 如果是代理請假，發送通知給被代理員工
+        if (isProxyRequest && !string.IsNullOrEmpty(proxyUserId))
+        {
+            await _notificationService.SendProxyLeaveNotificationAsync(
+                employeeId,
+                proxyUserId,
+                leaveRecord.Id,
+                type.ToString(),
+                startDate,
+                endDate,
+                days);
+        }
+
         return leaveRecord.Id;
     }
 
@@ -114,6 +131,16 @@ public class LeaveService : ILeaveService
         leaveRecord.Status = LeaveStatus.Approved;
         await _context.SaveChangesAsync();
 
+        // 發送確認通知給代理人
+        if (!string.IsNullOrEmpty(leaveRecord.ProxyUserId))
+        {
+            await _notificationService.SendProxyLeaveConfirmationNotificationAsync(
+                leaveRecord.ProxyUserId,
+                leaveRecord.EmployeeId,
+                leaveId,
+                true);
+        }
+
         return true;
     }
 
@@ -140,6 +167,16 @@ public class LeaveService : ILeaveService
 
         leaveRecord.Status = LeaveStatus.Rejected;
         await _context.SaveChangesAsync();
+
+        // 發送拒絕通知給代理人
+        if (!string.IsNullOrEmpty(leaveRecord.ProxyUserId))
+        {
+            await _notificationService.SendProxyLeaveConfirmationNotificationAsync(
+                leaveRecord.ProxyUserId,
+                leaveRecord.EmployeeId,
+                leaveId,
+                false);
+        }
 
         return true;
     }
