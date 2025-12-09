@@ -62,6 +62,9 @@ public enum LeaveStatus
     /// <summary>待審核</summary>
     Pending,
     
+    /// <summary>待確認（代理請假）</summary>
+    PendingConfirmation,
+    
     /// <summary>已核准</summary>
     Approved,
     

@@ -106,6 +106,11 @@ docker-compose down
 │   └── SQL/                           # 資料庫腳本
 ├── Frontend/
 │   └── HRPayrollSystem.Web/          # Vue 3 前端專案
+├── Tests/                             # 測試資料夾
+│   ├── test-login.ps1                # 登入測試腳本
+│   ├── test-authorization.ps1        # 權限測試腳本
+│   ├── TASK3_TEST_REPORT.md          # 任務三測試報告
+│   └── TASK4_COMPLETION_REPORT.md    # 任務四完成報告
 ├── .kiro/
 │   ├── specs/                         # 規格文件
 │   └── steering/                      # 專案指導文件
@@ -117,6 +122,24 @@ docker-compose down
 
 啟動後端後，訪問 Swagger UI：
 - 開發環境：http://localhost:5000/swagger
+
+## 測試
+
+### 執行測試腳本
+
+```bash
+# 測試登入功能
+cd Tests
+.\test-login.ps1
+
+# 測試權限功能
+.\test-authorization.ps1
+```
+
+### 測試報告
+
+- [任務三測試報告](Tests/TASK3_TEST_REPORT.md) - LDAP 整合和身份驗證
+- [任務四完成報告](Tests/TASK4_COMPLETION_REPORT.md) - 權限管理模組
 
 ## 開發指南
 

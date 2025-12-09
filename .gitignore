@@ -87,3 +87,7 @@ appsettings.Production.json
 *.pfx
 *.key
 *.pem
+
+# Test tokens and sensitive test data
+Tests/token.txt
+token.txt
