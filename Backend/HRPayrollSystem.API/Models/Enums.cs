@@ -86,3 +86,18 @@ public enum DataAccessScope
     /// <summary>全公司</summary>
     Company
 }
+
+/// <summary>
+/// 薪資項目計算方式
+/// </summary>
+public enum CalculationMethod
+{
+    /// <summary>固定金額</summary>
+    Fixed,
+    
+    /// <summary>按小時計算</summary>
+    Hourly,
+    
+    /// <summary>按比例計算</summary>
+    Percentage
+}

@@ -22,6 +22,7 @@ public class HRPayrollContext : DbContext
     public DbSet<LeaveRecord> LeaveRecords { get; set; } = null!;
     public DbSet<SalaryRecord> SalaryRecords { get; set; } = null!;
     public DbSet<SalaryItem> SalaryItems { get; set; } = null!;
+    public DbSet<SalaryItemDefinition> SalaryItemDefinitions { get; set; } = null!;
     public DbSet<RateTable> RateTables { get; set; } = null!;
     public DbSet<SystemParameter> SystemParameters { get; set; } = null!;
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
@@ -119,6 +120,17 @@ public class HRPayrollContext : DbContext
                 .HasConversion<string>();
             // 忽略導航屬性
             entity.Ignore(e => e.SalaryRecord);
+        });
+        
+        modelBuilder.Entity<SalaryItemDefinition>(entity =>
+        {
+            entity.ToTable("SalaryItemDefinitions");
+            entity.HasKey(e => e.Id);
+            // 將枚舉轉換為字串儲存
+            entity.Property(e => e.Type)
+                .HasConversion<string>();
+            entity.Property(e => e.CalculationMethod)
+                .HasConversion<string>();
         });
         
         modelBuilder.Entity<RateTable>(entity =>

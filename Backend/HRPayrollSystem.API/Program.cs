@@ -34,6 +34,7 @@ builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<IDepartmentService, DepartmentService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ILeaveService, LeaveService>();
+builder.Services.AddScoped<ISalaryItemDefinitionService, SalaryItemDefinitionService>();
 
 // 註冊背景服務（暫時禁用以進行測試）
 // builder.Services.AddHostedService<AdSyncBackgroundService>();
@@ -583,6 +584,170 @@ app.MapPost("/api/leaves/check-overlap", async (CheckOverlapRequest request, ILe
 .WithName("CheckLeaveOverlap")
 .WithOpenApi();
 
+// =============================================
+// 薪資項目定義管理 API
+// =============================================
+
+// 建立薪資項目定義
+app.MapPost("/api/salary-item-definitions", async (
+    CreateSalaryItemDefinitionRequest request,
+    ISalaryItemDefinitionService service,
+    HttpContext context) =>
+{
+    try
+    {
+        var username = context.User.Identity?.Name ?? "system";
+        
+        var definition = new SalaryItemDefinition
+        {
+            ItemCode = request.ItemCode,
+            ItemName = request.ItemName,
+            Type = Enum.Parse<SalaryItemType>(request.Type),
+            CalculationMethod = Enum.Parse<CalculationMethod>(request.CalculationMethod),
+            DefaultAmount = request.DefaultAmount,
+            HourlyRate = request.HourlyRate,
+            PercentageRate = request.PercentageRate,
+            Description = request.Description,
+            EffectiveDate = request.EffectiveDate,
+            ExpiryDate = request.ExpiryDate
+        };
+
+        var result = await service.CreateAsync(definition, username);
+        return Results.Created($"/api/salary-item-definitions/{result.Id}", result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CreateSalaryItemDefinition")
+.WithOpenApi();
+
+// 更新薪資項目定義
+app.MapPut("/api/salary-item-definitions/{id}", async (
+    string id,
+    UpdateSalaryItemDefinitionRequest request,
+    ISalaryItemDefinitionService service) =>
+{
+    try
+    {
+        var definition = new SalaryItemDefinition
+        {
+            ItemName = request.ItemName,
+            Type = Enum.Parse<SalaryItemType>(request.Type),
+            CalculationMethod = Enum.Parse<CalculationMethod>(request.CalculationMethod),
+            DefaultAmount = request.DefaultAmount,
+            HourlyRate = request.HourlyRate,
+            PercentageRate = request.PercentageRate,
+            Description = request.Description,
+            IsActive = request.IsActive,
+            EffectiveDate = request.EffectiveDate,
+            ExpiryDate = request.ExpiryDate
+        };
+
+        var result = await service.UpdateAsync(id, definition);
+        return Results.Ok(result);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { success = false, message = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("UpdateSalaryItemDefinition")
+.WithOpenApi();
+
+// 取得薪資項目定義
+app.MapGet("/api/salary-item-definitions/{id}", async (string id, ISalaryItemDefinitionService service) =>
+{
+    var definition = await service.GetByIdAsync(id);
+    if (definition == null)
+    {
+        return Results.NotFound(new { success = false, message = "找不到薪資項目定義" });
+    }
+    return Results.Ok(definition);
+})
+.RequireAuthorization()
+.WithName("GetSalaryItemDefinition")
+.WithOpenApi();
+
+// 取得所有啟用的薪資項目定義
+app.MapGet("/api/salary-item-definitions", async (ISalaryItemDefinitionService service) =>
+{
+    var definitions = await service.GetActiveItemsAsync();
+    return Results.Ok(definitions);
+})
+.RequireAuthorization()
+.WithName("GetActiveSalaryItemDefinitions")
+.WithOpenApi();
+
+// 取得所有薪資項目定義（含停用）
+app.MapGet("/api/salary-item-definitions/all", async (ISalaryItemDefinitionService service) =>
+{
+    var definitions = await service.GetAllItemsAsync();
+    return Results.Ok(definitions);
+})
+.RequireAuthorization()
+.WithName("GetAllSalaryItemDefinitions")
+.WithOpenApi();
+
+// 取得特定類型的薪資項目定義
+app.MapGet("/api/salary-item-definitions/by-type/{type}", async (
+    string type,
+    ISalaryItemDefinitionService service) =>
+{
+    try
+    {
+        var itemType = Enum.Parse<SalaryItemType>(type, true);
+        var definitions = await service.GetItemsByTypeAsync(itemType);
+        return Results.Ok(definitions);
+    }
+    catch (ArgumentException)
+    {
+        return Results.BadRequest(new { success = false, message = "無效的項目類型" });
+    }
+})
+.RequireAuthorization()
+.WithName("GetSalaryItemDefinitionsByType")
+.WithOpenApi();
+
+// 停用薪資項目定義
+app.MapPost("/api/salary-item-definitions/{id}/deactivate", async (
+    string id,
+    ISalaryItemDefinitionService service) =>
+{
+    var success = await service.DeactivateAsync(id);
+    if (!success)
+    {
+        return Results.NotFound(new { success = false, message = "找不到薪資項目定義" });
+    }
+    return Results.Ok(new { success = true, message = "薪資項目定義已停用" });
+})
+.RequireAuthorization()
+.WithName("DeactivateSalaryItemDefinition")
+.WithOpenApi();
+
+// 取得薪資項目定義的歷史版本
+app.MapGet("/api/salary-item-definitions/history/{itemCode}", async (
+    string itemCode,
+    ISalaryItemDefinitionService service) =>
+{
+    var history = await service.GetItemHistoryAsync(itemCode);
+    return Results.Ok(history);
+})
+.RequireAuthorization()
+.WithName("GetSalaryItemDefinitionHistory")
+.WithOpenApi();
+
 app.Run();
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
@@ -669,3 +834,33 @@ record CheckOverlapRequest(
     DateTime StartDate,
     DateTime EndDate,
     string? ExcludeLeaveId);
+
+/// <summary>
+/// 建立薪資項目定義請求
+/// </summary>
+record CreateSalaryItemDefinitionRequest(
+    string ItemCode,
+    string ItemName,
+    string Type,
+    string CalculationMethod,
+    decimal? DefaultAmount,
+    decimal? HourlyRate,
+    decimal? PercentageRate,
+    string? Description,
+    DateTime EffectiveDate,
+    DateTime? ExpiryDate);
+
+/// <summary>
+/// 更新薪資項目定義請求
+/// </summary>
+record UpdateSalaryItemDefinitionRequest(
+    string ItemName,
+    string Type,
+    string CalculationMethod,
+    decimal? DefaultAmount,
+    decimal? HourlyRate,
+    decimal? PercentageRate,
+    string? Description,
+    bool IsActive,
+    DateTime EffectiveDate,
+    DateTime? ExpiryDate);
