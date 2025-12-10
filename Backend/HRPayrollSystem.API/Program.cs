@@ -35,6 +35,7 @@ builder.Services.AddScoped<IDepartmentService, DepartmentService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ILeaveService, LeaveService>();
 builder.Services.AddScoped<ISalaryItemDefinitionService, SalaryItemDefinitionService>();
+builder.Services.AddScoped<IRateTableService, RateTableService>();
 
 // 註冊背景服務（暫時禁用以進行測試）
 // builder.Services.AddHostedService<AdSyncBackgroundService>();
@@ -748,6 +749,177 @@ app.MapGet("/api/salary-item-definitions/history/{itemCode}", async (
 .WithName("GetSalaryItemDefinitionHistory")
 .WithOpenApi();
 
+// =============================================
+// 費率表管理 API
+// =============================================
+
+// 建立費率表
+app.MapPost("/api/rate-tables", async (
+    CreateRateTableRequest request,
+    IRateTableService service,
+    HttpContext context) =>
+{
+    try
+    {
+        var username = context.User.Identity?.Name ?? "system";
+        
+        var rateTable = new RateTable
+        {
+            Version = request.Version,
+            EffectiveDate = request.EffectiveDate,
+            ExpiryDate = request.ExpiryDate,
+            LaborInsuranceRate = request.LaborInsuranceRate,
+            HealthInsuranceRate = request.HealthInsuranceRate,
+            Source = request.Source
+        };
+
+        var result = await service.CreateAsync(rateTable, username);
+        return Results.Created($"/api/rate-tables/{result.Id}", result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CreateRateTable")
+.WithOpenApi();
+
+// 更新費率表
+app.MapPut("/api/rate-tables/{id}", async (
+    string id,
+    UpdateRateTableRequest request,
+    IRateTableService service) =>
+{
+    try
+    {
+        var rateTable = new RateTable
+        {
+            Version = request.Version,
+            EffectiveDate = request.EffectiveDate,
+            ExpiryDate = request.ExpiryDate,
+            LaborInsuranceRate = request.LaborInsuranceRate,
+            HealthInsuranceRate = request.HealthInsuranceRate,
+            Source = request.Source
+        };
+
+        var result = await service.UpdateAsync(id, rateTable);
+        return Results.Ok(result);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { success = false, message = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("UpdateRateTable")
+.WithOpenApi();
+
+// 取得費率表
+app.MapGet("/api/rate-tables/{id}", async (string id, IRateTableService service) =>
+{
+    var rateTable = await service.GetByIdAsync(id);
+    if (rateTable == null)
+    {
+        return Results.NotFound(new { success = false, message = "找不到費率表" });
+    }
+    return Results.Ok(rateTable);
+})
+.RequireAuthorization()
+.WithName("GetRateTable")
+.WithOpenApi();
+
+// 取得生效的費率表
+app.MapGet("/api/rate-tables/effective/{date}", async (DateTime date, IRateTableService service) =>
+{
+    var rateTable = await service.GetEffectiveRateTableAsync(date);
+    if (rateTable == null)
+    {
+        return Results.NotFound(new { success = false, message = "找不到生效的費率表" });
+    }
+    return Results.Ok(rateTable);
+})
+.RequireAuthorization()
+.WithName("GetEffectiveRateTable")
+.WithOpenApi();
+
+// 取得所有費率表
+app.MapGet("/api/rate-tables", async (IRateTableService service) =>
+{
+    var rateTables = await service.GetAllRateTablesAsync();
+    return Results.Ok(rateTables);
+})
+.RequireAuthorization()
+.WithName("GetAllRateTables")
+.WithOpenApi();
+
+// 取得費率表歷史
+app.MapGet("/api/rate-tables/history", async (IRateTableService service) =>
+{
+    var history = await service.GetRateTableHistoryAsync();
+    return Results.Ok(history);
+})
+.RequireAuthorization()
+.WithName("GetRateTableHistory")
+.WithOpenApi();
+
+// 匯入費率表
+app.MapPost("/api/rate-tables/import", async (
+    HttpRequest request,
+    IRateTableService service,
+    HttpContext context) =>
+{
+    try
+    {
+        var username = context.User.Identity?.Name ?? "system";
+        
+        if (!request.HasFormContentType || request.Form.Files.Count == 0)
+        {
+            return Results.BadRequest(new { success = false, message = "請上傳檔案" });
+        }
+
+        var file = request.Form.Files[0];
+        using var stream = file.OpenReadStream();
+        
+        var result = await service.ImportFromFileAsync(stream, file.FileName, username);
+        return Results.Created($"/api/rate-tables/{result.Id}", result);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("ImportRateTable")
+.WithOpenApi()
+.DisableAntiforgery();
+
+// 刪除費率表
+app.MapDelete("/api/rate-tables/{id}", async (string id, IRateTableService service) =>
+{
+    var success = await service.DeleteAsync(id);
+    if (!success)
+    {
+        return Results.NotFound(new { success = false, message = "找不到費率表" });
+    }
+    return Results.Ok(new { success = true, message = "費率表已刪除" });
+})
+.RequireAuthorization()
+.WithName("DeleteRateTable")
+.WithOpenApi();
+
 app.Run();
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
@@ -864,3 +1036,25 @@ record UpdateSalaryItemDefinitionRequest(
     bool IsActive,
     DateTime EffectiveDate,
     DateTime? ExpiryDate);
+
+/// <summary>
+/// 建立費率表請求
+/// </summary>
+record CreateRateTableRequest(
+    string Version,
+    DateTime EffectiveDate,
+    DateTime? ExpiryDate,
+    decimal LaborInsuranceRate,
+    decimal HealthInsuranceRate,
+    string Source);
+
+/// <summary>
+/// 更新費率表請求
+/// </summary>
+record UpdateRateTableRequest(
+    string Version,
+    DateTime EffectiveDate,
+    DateTime? ExpiryDate,
+    decimal LaborInsuranceRate,
+    decimal HealthInsuranceRate,
+    string Source);

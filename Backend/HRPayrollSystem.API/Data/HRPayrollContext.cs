@@ -137,6 +137,8 @@ public class HRPayrollContext : DbContext
         {
             entity.ToTable("RateTables");
             entity.HasKey(e => e.Id);
+            // 忽略導航屬性
+            entity.Ignore(e => e.CreatedByEmployee);
         });
         
         modelBuilder.Entity<SystemParameter>(entity =>
