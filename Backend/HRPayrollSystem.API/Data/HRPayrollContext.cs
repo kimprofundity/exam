@@ -39,6 +39,8 @@ public class HRPayrollContext : DbContext
             // 將枚舉轉換為字串儲存
             entity.Property(e => e.Status)
                 .HasConversion<string>();
+            entity.Property(e => e.SalaryType)
+                .HasConversion<string>();
             // 忽略導航屬性，避免循環依賴
             entity.Ignore(e => e.Department);
             entity.Ignore(e => e.SalaryRecords);
@@ -106,9 +108,18 @@ public class HRPayrollContext : DbContext
             // 將枚舉轉換為字串儲存
             entity.Property(e => e.Status)
                 .HasConversion<string>();
-            // 忽略導航屬性
-            entity.Ignore(e => e.Employee);
-            entity.Ignore(e => e.SalaryItems);
+            
+            // 配置與 Employee 的關係
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.SalaryRecords)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+                
+            // 配置與 SalaryItems 的關係
+            entity.HasMany(e => e.SalaryItems)
+                .WithOne(si => si.SalaryRecord)
+                .HasForeignKey(si => si.SalaryRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
         
         modelBuilder.Entity<SalaryItem>(entity =>
@@ -118,8 +129,6 @@ public class HRPayrollContext : DbContext
             // 將枚舉轉換為字串儲存
             entity.Property(e => e.Type)
                 .HasConversion<string>();
-            // 忽略導航屬性
-            entity.Ignore(e => e.SalaryRecord);
         });
         
         modelBuilder.Entity<SalaryItemDefinition>(entity =>

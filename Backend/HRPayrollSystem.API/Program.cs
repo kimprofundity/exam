@@ -14,14 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // 配置資料庫連線
 builder.Services.AddDbContext<HRPayrollContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlOptions => sqlOptions.EnableRetryOnFailure(
-            maxRetryCount: 3,
-            maxRetryDelay: TimeSpan.FromSeconds(5),
-            errorNumbersToAdd: null
-        )
-    )
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"))
 );
 
 // 註冊服務
@@ -36,6 +29,8 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ILeaveService, LeaveService>();
 builder.Services.AddScoped<ISalaryItemDefinitionService, SalaryItemDefinitionService>();
 builder.Services.AddScoped<IRateTableService, RateTableService>();
+builder.Services.AddScoped<IPayrollCalculationService, PayrollCalculationService>();
+builder.Services.AddScoped<ITaxCalculationService, TaxCalculationService>();
 
 // 註冊背景服務（暫時禁用以進行測試）
 // builder.Services.AddHostedService<AdSyncBackgroundService>();
@@ -222,6 +217,40 @@ app.MapPost("/api/employees", async (CreateEmployeeRequest request, IEmployeeSer
 })
 .RequireAuthorization()
 .WithName("CreateEmployee")
+.WithOpenApi();
+
+// 建立員工（支援薪資類型）
+app.MapPost("/api/employees/with-salary-type", async (CreateEmployeeWithSalaryTypeRequest request, IEmployeeService employeeService) =>
+{
+    try
+    {
+        var salaryType = Enum.Parse<SalaryType>(request.SalaryType, true);
+        
+        var employeeId = await employeeService.CreateEmployeeWithSalaryTypeAsync(
+            request.EmployeeNumber,
+            request.Name,
+            request.DepartmentId,
+            request.Position,
+            salaryType,
+            request.MonthlySalary,
+            request.DailySalary,
+            request.HourlySalary,
+            request.BankCode,
+            request.BankAccount);
+
+        return Results.Created($"/api/employees/{employeeId}", new { id = employeeId });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CreateEmployeeWithSalaryType")
 .WithOpenApi();
 
 // 更新員工
@@ -920,6 +949,340 @@ app.MapDelete("/api/rate-tables/{id}", async (string id, IRateTableService servi
 .WithName("DeleteRateTable")
 .WithOpenApi();
 
+// =============================================
+// 薪資計算 API
+// =============================================
+
+// 計算員工薪資
+app.MapPost("/api/payroll/calculate", async (
+    CalculateSalaryRequest request,
+    IPayrollCalculationService service,
+    HRPayrollContext context) =>
+{
+    try
+    {
+        var salaryRecord = await service.CalculateSalaryAsync(
+            request.EmployeeId,
+            request.Period,
+            request.CopyFromPreviousMonth);
+
+        // 儲存薪資記錄到資料庫
+        context.SalaryRecords.Add(salaryRecord);
+        await context.SaveChangesAsync();
+
+        return Results.Created($"/api/payroll/salary-records/{salaryRecord.Id}", salaryRecord);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CalculateSalary")
+.WithOpenApi();
+
+// 取得薪資記錄
+app.MapGet("/api/payroll/salary-records/{id}", async (string id, HRPayrollContext context) =>
+{
+    var salaryRecord = await context.SalaryRecords
+        .Include(sr => sr.Employee)
+        .Include(sr => sr.SalaryItems)
+        .FirstOrDefaultAsync(sr => sr.Id == id);
+
+    if (salaryRecord == null)
+    {
+        return Results.NotFound(new { success = false, message = "找不到薪資記錄" });
+    }
+
+    return Results.Ok(salaryRecord);
+})
+.RequireAuthorization()
+.WithName("GetSalaryRecord")
+.WithOpenApi();
+
+// 取得員工薪資記錄列表
+app.MapGet("/api/payroll/employees/{employeeId}/salary-records", async (
+    string employeeId,
+    HRPayrollContext context,
+    int? year = null,
+    int? month = null,
+    int pageNumber = 1,
+    int pageSize = 20) =>
+{
+    var query = context.SalaryRecords
+        .Include(sr => sr.Employee)
+        .Where(sr => sr.EmployeeId == employeeId);
+
+    if (year.HasValue)
+    {
+        query = query.Where(sr => sr.Period.Year == year.Value);
+    }
+
+    if (month.HasValue)
+    {
+        query = query.Where(sr => sr.Period.Month == month.Value);
+    }
+
+    var totalCount = await query.CountAsync();
+    var records = await query
+        .OrderByDescending(sr => sr.Period)
+        .Skip((pageNumber - 1) * pageSize)
+        .Take(pageSize)
+        .ToListAsync();
+
+    return Results.Ok(new
+    {
+        data = records,
+        totalCount,
+        pageNumber,
+        pageSize,
+        totalPages = (int)Math.Ceiling((double)totalCount / pageSize)
+    });
+})
+.RequireAuthorization()
+.WithName("GetEmployeeSalaryRecords")
+.WithOpenApi();
+
+// 載入上月薪資記錄
+app.MapGet("/api/payroll/employees/{employeeId}/previous-month-salary", async (
+    string employeeId,
+    DateTime currentPeriod,
+    IPayrollCalculationService service) =>
+{
+    var previousSalary = await service.LoadPreviousMonthSalaryAsync(employeeId, currentPeriod);
+    
+    if (previousSalary == null)
+    {
+        return Results.NotFound(new { success = false, message = "找不到上月薪資記錄" });
+    }
+
+    return Results.Ok(previousSalary);
+})
+.RequireAuthorization()
+.WithName("GetPreviousMonthSalary")
+.WithOpenApi();
+
+// 計算基本薪資
+app.MapPost("/api/payroll/calculate-base-salary", async (
+    CalculateBaseSalaryRequest request,
+    IPayrollCalculationService service,
+    HRPayrollContext context) =>
+{
+    try
+    {
+        var employee = await context.Employees.FindAsync(request.EmployeeId);
+        if (employee == null)
+        {
+            return Results.NotFound(new { success = false, message = "找不到員工資料" });
+        }
+
+        var baseSalary = await service.CalculateBaseSalaryAsync(
+            employee,
+            request.Period,
+            request.WorkDays,
+            request.TotalWorkDays);
+
+        return Results.Ok(new { baseSalary });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CalculateBaseSalary")
+.WithOpenApi();
+
+// 計算請假扣款
+app.MapGet("/api/payroll/employees/{employeeId}/leave-deduction", async (
+    string employeeId,
+    DateTime period,
+    IPayrollCalculationService service) =>
+{
+    var deduction = await service.CalculateLeaveDeductionAsync(employeeId, period);
+    return Results.Ok(new { leaveDeduction = deduction });
+})
+.RequireAuthorization()
+.WithName("CalculateLeaveDeduction")
+.WithOpenApi();
+
+// 計算加班費
+app.MapPost("/api/payroll/calculate-overtime", async (
+    CalculateOvertimeRequest request,
+    IPayrollCalculationService service) =>
+{
+    var overtimePay = await service.CalculateOvertimePayAsync(
+        request.EmployeeId,
+        request.Period,
+        request.OvertimeHours);
+
+    return Results.Ok(new { overtimePay });
+})
+.RequireAuthorization()
+.WithName("CalculateOvertimePay")
+.WithOpenApi();
+
+// 取得當月工作天數
+app.MapGet("/api/payroll/working-days/{period}", async (
+    DateTime period,
+    IPayrollCalculationService service) =>
+{
+    var workingDays = await service.GetWorkingDaysInMonthAsync(period);
+    return Results.Ok(new { workingDays });
+})
+.RequireAuthorization()
+.WithName("GetWorkingDays")
+.WithOpenApi();
+
+// 計算實際出勤天數
+app.MapGet("/api/payroll/employees/{employeeId}/actual-work-days", async (
+    string employeeId,
+    DateTime period,
+    IPayrollCalculationService service) =>
+{
+    var actualWorkDays = await service.CalculateActualWorkDaysAsync(employeeId, period);
+    return Results.Ok(new { actualWorkDays });
+})
+.RequireAuthorization()
+.WithName("CalculateActualWorkDays")
+.WithOpenApi();
+
+// =============================================
+// 稅務計算 API
+// =============================================
+
+// 計算所得稅
+app.MapPost("/api/tax/calculate-income-tax", async (
+    CalculateIncomeTaxRequest request,
+    ITaxCalculationService service) =>
+{
+    try
+    {
+        var incomeTax = await service.CalculateIncomeTaxAsync(
+            request.GrossSalary,
+            request.EmployeeId,
+            request.Period);
+
+        return Results.Ok(new { incomeTax });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CalculateIncomeTax")
+.WithOpenApi();
+
+// 計算勞保費
+app.MapPost("/api/tax/calculate-labor-insurance", async (
+    CalculateInsuranceRequest request,
+    ITaxCalculationService service) =>
+{
+    try
+    {
+        var laborInsurance = await service.CalculateLaborInsuranceAsync(
+            request.Salary,
+            request.Period);
+
+        return Results.Ok(new { laborInsurance });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CalculateLaborInsurance")
+.WithOpenApi();
+
+// 計算健保費
+app.MapPost("/api/tax/calculate-health-insurance", async (
+    CalculateInsuranceRequest request,
+    ITaxCalculationService service) =>
+{
+    try
+    {
+        var healthInsurance = await service.CalculateHealthInsuranceAsync(
+            request.Salary,
+            request.Period);
+
+        return Results.Ok(new { healthInsurance });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CalculateHealthInsurance")
+.WithOpenApi();
+
+// 計算累進稅率所得稅
+app.MapPost("/api/tax/calculate-progressive-tax", async (
+    CalculateProgressiveTaxRequest request,
+    ITaxCalculationService service) =>
+{
+    try
+    {
+        var progressiveTax = await service.CalculateProgressiveTaxAsync(
+            request.AnnualIncome,
+            request.Deductions,
+            request.Exemptions);
+
+        return Results.Ok(new { progressiveTax });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { success = false, message = ex.Message });
+    }
+})
+.RequireAuthorization()
+.WithName("CalculateProgressiveTax")
+.WithOpenApi();
+
+// 取得員工扣除額
+app.MapGet("/api/tax/employees/{employeeId}/deductions/{year}", async (
+    string employeeId,
+    int year,
+    ITaxCalculationService service) =>
+{
+    var deductions = await service.GetEmployeeDeductionsAsync(employeeId, year);
+    return Results.Ok(new { employeeId, year, deductions });
+})
+.RequireAuthorization()
+.WithName("GetEmployeeDeductions")
+.WithOpenApi();
+
+// 取得員工免稅額
+app.MapGet("/api/tax/employees/{employeeId}/exemptions/{year}", async (
+    string employeeId,
+    int year,
+    ITaxCalculationService service) =>
+{
+    var exemptions = await service.GetEmployeeExemptionsAsync(employeeId, year);
+    return Results.Ok(new { employeeId, year, exemptions });
+})
+.RequireAuthorization()
+.WithName("GetEmployeeExemptions")
+.WithOpenApi();
+
+// 取得累進稅率表
+app.MapGet("/api/tax/progressive-tax-brackets/{year}", async (
+    int year,
+    ITaxCalculationService service) =>
+{
+    var brackets = await service.GetProgressiveTaxBracketsAsync(year);
+    return Results.Ok(brackets);
+})
+.RequireAuthorization()
+.WithName("GetProgressiveTaxBrackets")
+.WithOpenApi();
+
 app.Run();
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
@@ -946,6 +1309,21 @@ record CreateEmployeeRequest(
     string DepartmentId,
     string? Position,
     decimal MonthlySalary,
+    string? BankCode,
+    string? BankAccount);
+
+/// <summary>
+/// 建立員工請求（支援薪資類型）
+/// </summary>
+record CreateEmployeeWithSalaryTypeRequest(
+    string EmployeeNumber,
+    string Name,
+    string DepartmentId,
+    string? Position,
+    string SalaryType, // "Monthly", "Daily", "Hourly"
+    decimal? MonthlySalary,
+    decimal? DailySalary,
+    decimal? HourlySalary,
     string? BankCode,
     string? BankAccount);
 
@@ -1058,3 +1436,51 @@ record UpdateRateTableRequest(
     decimal LaborInsuranceRate,
     decimal HealthInsuranceRate,
     string Source);
+
+/// <summary>
+/// 計算薪資請求
+/// </summary>
+record CalculateSalaryRequest(
+    string EmployeeId,
+    DateTime Period,
+    bool CopyFromPreviousMonth = false);
+
+/// <summary>
+/// 計算基本薪資請求
+/// </summary>
+record CalculateBaseSalaryRequest(
+    string EmployeeId,
+    DateTime Period,
+    decimal WorkDays,
+    decimal TotalWorkDays);
+
+/// <summary>
+/// 計算加班費請求
+/// </summary>
+record CalculateOvertimeRequest(
+    string EmployeeId,
+    DateTime Period,
+    decimal OvertimeHours);
+
+/// <summary>
+/// 計算所得稅請求
+/// </summary>
+record CalculateIncomeTaxRequest(
+    decimal GrossSalary,
+    string EmployeeId,
+    DateTime Period);
+
+/// <summary>
+/// 計算保險費請求
+/// </summary>
+record CalculateInsuranceRequest(
+    decimal Salary,
+    DateTime Period);
+
+/// <summary>
+/// 計算累進稅率所得稅請求
+/// </summary>
+record CalculateProgressiveTaxRequest(
+    decimal AnnualIncome,
+    decimal Deductions,
+    decimal Exemptions);

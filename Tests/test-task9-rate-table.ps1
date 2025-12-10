@@ -1,6 +1,6 @@
 # Task 9 Test Script: Rate Table Management
 
-$baseUrl = "http://localhost:5183"
+$baseUrl = "http://localhost:5000"
 $testResults = @()
 
 Write-Host "========================================" -ForegroundColor Cyan

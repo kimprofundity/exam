@@ -20,8 +20,17 @@ public class Employee
     /// <summary>職位</summary>
     public string? Position { get; set; }
     
+    /// <summary>薪資類型（月薪/日薪/時薪）</summary>
+    public SalaryType SalaryType { get; set; } = SalaryType.Monthly;
+    
     /// <summary>固定月薪金額</summary>
     public decimal MonthlySalary { get; set; }
+    
+    /// <summary>日薪金額（當薪資類型為日薪時使用）</summary>
+    public decimal? DailySalary { get; set; }
+    
+    /// <summary>時薪金額（當薪資類型為時薪時使用）</summary>
+    public decimal? HourlySalary { get; set; }
     
     /// <summary>銀行代碼</summary>
     public string? BankCode { get; set; }

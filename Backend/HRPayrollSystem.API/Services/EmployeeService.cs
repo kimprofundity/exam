@@ -74,6 +74,82 @@ public class EmployeeService : IEmployeeService
         return employee.Id;
     }
 
+    public async Task<string> CreateEmployeeWithSalaryTypeAsync(
+        string employeeNumber,
+        string name,
+        string departmentId,
+        string? position,
+        SalaryType salaryType,
+        decimal? monthlySalary,
+        decimal? dailySalary,
+        decimal? hourlySalary,
+        string? bankCode,
+        string? bankAccount)
+    {
+        if (string.IsNullOrWhiteSpace(employeeNumber))
+            throw new ArgumentException("員工編號不能為空", nameof(employeeNumber));
+
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("員工姓名不能為空", nameof(name));
+
+        if (string.IsNullOrWhiteSpace(departmentId))
+            throw new ArgumentException("部門識別碼不能為空", nameof(departmentId));
+
+        // 根據薪資類型驗證對應的薪資欄位
+        switch (salaryType)
+        {
+            case SalaryType.Monthly:
+                if (!monthlySalary.HasValue || monthlySalary <= 0)
+                    throw new ArgumentException("月薪類型員工必須設定有效的月薪金額", nameof(monthlySalary));
+                break;
+            case SalaryType.Daily:
+                if (!dailySalary.HasValue || dailySalary <= 0)
+                    throw new ArgumentException("日薪類型員工必須設定有效的日薪金額", nameof(dailySalary));
+                break;
+            case SalaryType.Hourly:
+                if (!hourlySalary.HasValue || hourlySalary <= 0)
+                    throw new ArgumentException("時薪類型員工必須設定有效的時薪金額", nameof(hourlySalary));
+                break;
+        }
+
+        // 檢查員工編號是否已存在
+        if (await EmployeeNumberExistsAsync(employeeNumber))
+        {
+            throw new InvalidOperationException($"員工編號 {employeeNumber} 已存在");
+        }
+
+        // 檢查部門是否存在
+        var department = await _context.Departments.FindAsync(departmentId);
+        if (department == null)
+        {
+            throw new InvalidOperationException($"部門 {departmentId} 不存在");
+        }
+
+        var employee = new Employee
+        {
+            Id = Guid.NewGuid().ToString(),
+            EmployeeNumber = employeeNumber,
+            Name = name,
+            DepartmentId = departmentId,
+            Position = position,
+            SalaryType = salaryType,
+            MonthlySalary = monthlySalary ?? 0,
+            DailySalary = dailySalary,
+            HourlySalary = hourlySalary,
+            BankCode = bankCode,
+            BankAccount = bankAccount,
+            Status = EmployeeStatus.Active,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _context.Employees.Add(employee);
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("員工建立成功：{EmployeeId}，薪資類型：{SalaryType}", employee.Id, salaryType);
+        return employee.Id;
+    }
+
     public async Task UpdateEmployeeAsync(
         string employeeId,
         string name,

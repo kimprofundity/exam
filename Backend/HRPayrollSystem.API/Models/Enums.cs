@@ -101,3 +101,18 @@ public enum CalculationMethod
     /// <summary>按比例計算</summary>
     Percentage
 }
+
+/// <summary>
+/// 薪資類型
+/// </summary>
+public enum SalaryType
+{
+    /// <summary>月薪</summary>
+    Monthly,
+    
+    /// <summary>日薪</summary>
+    Daily,
+    
+    /// <summary>時薪</summary>
+    Hourly
+}

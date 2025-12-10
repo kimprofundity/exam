@@ -28,6 +28,32 @@ public interface IEmployeeService
         string? bankAccount);
 
     /// <summary>
+    /// 建立新員工（支援不同薪資類型）
+    /// </summary>
+    /// <param name="employeeNumber">員工編號</param>
+    /// <param name="name">員工姓名</param>
+    /// <param name="departmentId">部門識別碼</param>
+    /// <param name="position">職位</param>
+    /// <param name="salaryType">薪資類型</param>
+    /// <param name="monthlySalary">月薪金額</param>
+    /// <param name="dailySalary">日薪金額</param>
+    /// <param name="hourlySalary">時薪金額</param>
+    /// <param name="bankCode">銀行代碼</param>
+    /// <param name="bankAccount">銀行帳號</param>
+    /// <returns>建立的員工識別碼</returns>
+    Task<string> CreateEmployeeWithSalaryTypeAsync(
+        string employeeNumber,
+        string name,
+        string departmentId,
+        string? position,
+        SalaryType salaryType,
+        decimal? monthlySalary,
+        decimal? dailySalary,
+        decimal? hourlySalary,
+        string? bankCode,
+        string? bankAccount);
+
+    /// <summary>
     /// 更新員工資料
     /// </summary>
     /// <param name="employeeId">員工識別碼</param>
